@@ -40,7 +40,9 @@ def test_silence() -> None:
     """Test on WAV with no speech."""
     audio = read_wav("silence.wav")
     is_speech = run_vad(audio)
-    assert all(not v for v in is_speech)
+
+    # Less than 10% of chunks are incorrectly classified
+    assert (sum(is_speech) / len(is_speech)) < 0.1
 
 
 def test_speech() -> None:

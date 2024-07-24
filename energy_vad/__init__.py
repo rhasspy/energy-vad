@@ -17,6 +17,7 @@ class EnergyVad:
         threshold: Optional[float] = None,
         samples_per_chunk: int = 240,
         calibrate_seconds: float = 0.5,
+        calibrate_zscore_threshold: float = 1.0,
     ) -> None:
         """
         Initialize VAD.
@@ -30,6 +31,9 @@ class EnergyVad:
             Number of samples that process_chunk will expect.
         calibrate_seconds: float
             Seconds of audio that will be used to calibrate threshold.
+        calibrate_zscore_threshold: float
+            Only energies below this (median) z-score threshold will be used in
+            calibration.
         """
         self.samples_per_chunk = samples_per_chunk
         self.bytes_per_chunk = self.samples_per_chunk * _SAMPLE_WIDTH
@@ -38,6 +42,7 @@ class EnergyVad:
         self.threshold = threshold
 
         self.calibrate_seconds = calibrate_seconds
+        self.calibrate_zscore_threshold = calibrate_zscore_threshold
         self._calibrate_seconds_left = self.calibrate_seconds
         self._calibrate_energies: List[float] = []
 
@@ -76,10 +81,21 @@ class EnergyVad:
 
         if self.threshold is None:
             if self._calibrate_seconds_left <= 0:
-                # Calibration complete
-                self.threshold = statistics.mean(self._calibrate_energies) + math.sqrt(
-                    statistics.variance(self._calibrate_energies)
-                )
+                # Enough energy values are available for calibration.
+                # Calculate median z-score to remove high-energy clicks.
+                median = statistics.median(self._calibrate_energies)
+                stdev = statistics.stdev(self._calibrate_energies)
+                z_score = [(x - median) / stdev for x in self._calibrate_energies]
+
+                # Filter outliers, but fall back to using all energies if
+                # everything gets filtered out.
+                energies = [
+                    x
+                    for i, x in enumerate(self._calibrate_energies)
+                    if z_score[i] < self.calibrate_zscore_threshold
+                ] or self._calibrate_energies
+
+                self.threshold = statistics.mean(energies) + statistics.stdev(energies)
             else:
                 self._calibrate_energies.append(debiased_energy)
                 self._calibrate_seconds_left -= self.seconds_per_chunk
